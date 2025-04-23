@@ -1,7 +1,8 @@
 #define HL_NAME(n) sdl_##n
 #include <hl.h>
+#include <stdio.h> // For debugging output
 
-#if defined(HL_IOS) || defined (HL_TVOS)
+#if defined(HL_IOS) || defined(HL_TVOS)
 #	include <SDL.h>
 #	include <SDL_syswm.h>
 #	include <OpenGLES/ES3/gl.h>
@@ -47,13 +48,42 @@
 #	define glClearDepth glClearDepthf
 #endif
 
+// Define function pointer types
+typedef void (APIENTRY *PFNGLENABLEPROC)(GLenum cap);
+typedef void (APIENTRY *PFNGLDISABLEPROC)(GLenum cap);
+typedef void (APIENTRY *PFNGLCLEARPROC)(GLbitfield mask);
+typedef GLenum (APIENTRY *PFNGLGETERRORPROC)(void);
+typedef void (APIENTRY *PFNGLSCISSORPROC)(GLint x, GLint y, GLsizei width, GLsizei height);
+typedef void (APIENTRY *PFNGLCLEARCOLORPROC)(GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha);
+typedef void (APIENTRY *PFNGLCLEARDEPTHPROC)(GLclampd depth);
+typedef void (APIENTRY *PFNGLCLEARSTENCILPROC)(GLint s);
+typedef void (APIENTRY *PFNGLVIEWPORTPROC)(GLint x, GLint y, GLsizei width, GLsizei height);
+typedef void (APIENTRY *PFNGLFLUSHPROC)(void);
+typedef void (APIENTRY *PFNGLFINISHPROC)(void);
+typedef void (APIENTRY *PFNGLPIXELSTOREIPROC)(GLenum pname, GLint param);
+typedef const GLubyte* (APIENTRY *PFNGLGETSTRINGPROC)(GLenum name);
+typedef void (APIENTRY *PFNGLPOLYGONMODEPROC)(GLenum face, GLenum mode);
+typedef void (APIENTRY *PFNGLPOLYGONOFFSETPROC)(GLfloat factor, GLfloat units);
+typedef void (APIENTRY *PFNGLCULLFACEPROC)(GLenum mode);
+typedef void (APIENTRY *PFNGLBLENDFUNCPROC)(GLenum sfactor, GLenum dfactor);
+typedef void (APIENTRY *PFNGLBLENDFUNCSEPARATEPROC)(GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha);
+typedef void (APIENTRY *PFNGLBLENDEQUATIONPROC)(GLenum mode);
+typedef void (APIENTRY *PFNGLBLENDEQUATIONSEPARATEPROC)(GLenum modeRGB, GLenum modeAlpha);
+typedef void (APIENTRY *PFNGLDEPTHMASKPROC)(GLboolean flag);
+typedef void (APIENTRY *PFNGLDEPTHFUNCPROC)(GLenum func);
+typedef void (APIENTRY *PFNGLCOLORMASKPROC)(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha);
+typedef void (APIENTRY *PFNGLCOLORMASKIPROC)(GLuint index, GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha);
+typedef void (APIENTRY *PFNGLSTENCILMASKSEPARATEPROC)(GLenum face, GLuint mask);
+typedef void (APIENTRY *PFNGLSTENCILFUNCSEPARATEPROC)(GLenum face, GLenum func, GLint ref, GLuint mask);
+typedef void (APIENTRY *PFNGLSTENCILOPSEPARATEPROC)(GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass);
+
 #if !defined(HL_CONSOLE) && !defined(GL_IMPORT)
-#define GL_IMPORT(fun, t) PFNGL##t##PROC fun
+#define GL_IMPORT(fun, t) static PFNGL##t##PROC sdl_##fun
 #include "GLImports.h"
 #undef GL_IMPORT
-#define GL_IMPORT(fun,t)	fun = (PFNGL##t##PROC)SDL_GL_GetProcAddress(#fun); if( fun == NULL ) return 1
+#define GL_IMPORT(fun,t) sdl_##fun = (PFNGL##t##PROC)SDL_GL_GetProcAddress(#fun); if( sdl_##fun == NULL ) { fprintf(stderr, "Failed to load %s\n", #fun); return 1; }
 #ifndef __APPLE__
-#define GL_IMPORT_OPT(fun, t) PFNGL##t##PROC fun = NULL; if ( !fun ) { fun = (PFNGL##t##PROC)SDL_GL_GetProcAddress(#fun); if( fun == NULL ) hl_error("function not resolved"); }
+#define GL_IMPORT_OPT(fun, t) static PFNGL##t##PROC sdl_##fun = NULL; if ( !sdl_##fun ) { sdl_##fun = (PFNGL##t##PROC)SDL_GL_GetProcAddress(#fun); if( sdl_##fun == NULL ) hl_error("function not resolved: %s", #fun); }
 #endif
 #endif
 
@@ -63,6 +93,20 @@
 #endif
 
 static int GLLoadAPI() {
+	// Ensure SDL OpenGL context is initialized
+	if (!SDL_GL_GetCurrentContext()) {
+		fprintf(stderr, "No active OpenGL context found\n");
+		return 1;
+	}
+
+	// Print OpenGL version for debugging
+	const GLubyte* glVersion = NULL;
+	GL_IMPORT(glGetString, GETSTRING);
+	if (sdl_glGetString) {
+		glVersion = sdl_glGetString(GL_VERSION);
+		fprintf(stderr, "OpenGL Version: %s\n", glVersion ? (const char*)glVersion : "unknown");
+	}
+
 #	include "GLImports.h"
 	return 0;
 }
@@ -81,113 +125,142 @@ HL_PRIM bool HL_NAME(gl_is_context_lost)() {
 }
 
 HL_PRIM void HL_NAME(gl_clear)( int bits ) {
-	glClear(bits);
+	if (sdl_glClear) sdl_glClear(bits);
+	else hl_error("glClear not loaded");
 }
 
 HL_PRIM int HL_NAME(gl_get_error)() {
-	return glGetError();
+	if (sdl_glGetError) return sdl_glGetError();
+	hl_error("glGetError not loaded");
+	return 0;
 }
 
 HL_PRIM void HL_NAME(gl_scissor)( int x, int y, int width, int height ) {
-	glScissor(x, y, width, height);
+	if (sdl_glScissor) sdl_glScissor(x, y, width, height);
+	else hl_error("glScissor not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_clear_color)( double r, double g, double b, double a ) {
-	glClearColor((float)r, (float)g, (float)b, (float)a);
+	if (sdl_glClearColor) sdl_glClearColor((float)r, (float)g, (float)b, (float)a);
+	else hl_error("glClearColor not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_clear_depth)( double value ) {
-	glClearDepth(value);
+	if (sdl_glClearDepth) sdl_glClearDepth(value);
+	else hl_error("glClearDepth not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_clear_stencil)( int value ) {
-	glClearStencil(value);
+	if (sdl_glClearStencil) sdl_glClearStencil(value);
+	else hl_error("glClearStencil not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_viewport)( int x, int y, int width, int height ) {
-	glViewport(x, y, width, height);
+	if (sdl_glViewport) sdl_glViewport(x, y, width, height);
+	else hl_error("glViewport not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_flush)() {
-	glFlush();
+	if (sdl_glFlush) sdl_glFlush();
+	else hl_error("glFlush not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_finish)() {
-	glFinish();
+	if (sdl_glFinish) sdl_glFinish();
+	else hl_error("glFinish not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_pixel_storei)( int key, int value ) {
-	glPixelStorei(key, value);
+	if (sdl_glPixelStorei) sdl_glPixelStorei(key, value);
+	else hl_error("glPixelStorei not loaded");
 }
 
 HL_PRIM vbyte *HL_NAME(gl_get_string)(int name) {
-	return (vbyte*)glGetString(name);
+	if (sdl_glGetString) return (vbyte*)sdl_glGetString(name);
+	hl_error("glGetString not loaded");
+	return NULL;
 }
 
 // state changes
 
 HL_PRIM void HL_NAME(gl_polygon_mode)(int face, int mode) {
-	glPolygonMode(face, mode);
+	if (sdl_glPolygonMode) sdl_glPolygonMode(face, mode);
+	else hl_error("glPolygonMode not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_polygon_offset)(float factor, float units) {
-	glPolygonOffset(factor, units);
+	if (sdl_glPolygonOffset) sdl_glPolygonOffset(factor, units);
+	else hl_error("glPolygonOffset not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_enable)( int feature ) {
-	glEnable(feature);
+	if (sdl_glEnable) sdl_glEnable(feature);
+	else hl_error("glEnable not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_disable)( int feature ) {
-	glDisable(feature);
+	if (sdl_glDisable) sdl_glDisable(feature);
+	else hl_error("glDisable not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_cull_face)( int face ) {
-	glCullFace(face);
+	if (sdl_glCullFace) sdl_glCullFace(face);
+	else hl_error("glCullFace not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_blend_func)( int src, int dst ) {
-	glBlendFunc(src, dst);
+	if (sdl_glBlendFunc) sdl_glBlendFunc(src, dst);
+	else hl_error("glBlendFunc not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_blend_func_separate)( int src, int dst, int alphaSrc, int alphaDst ) {
-	glBlendFuncSeparate(src, dst, alphaSrc, alphaDst);
+	if (sdl_glBlendFuncSeparate) sdl_glBlendFuncSeparate(src, dst, alphaSrc, alphaDst);
+	else hl_error("glBlendFuncSeparate not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_blend_equation)( int op ) {
-	glBlendEquation(op);
+	if (sdl_glBlendEquation) sdl_glBlendEquation(op);
+	else hl_error("glBlendEquation not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_blend_equation_separate)( int op, int alphaOp ) {
-	glBlendEquationSeparate(op, alphaOp);
+	if (sdl_glBlendEquationSeparate) sdl_glBlendEquationSeparate(op, alphaOp);
+	else hl_error("glBlendEquationSeparate not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_depth_mask)( bool mask ) {
-	glDepthMask(mask);
+	if (sdl_glDepthMask) sdl_glDepthMask(mask);
+	else hl_error("glDepthMask not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_depth_func)( int f ) {
-	glDepthFunc(f);
+	if (sdl_glDepthFunc) sdl_glDepthFunc(f);
+	else hl_error("glDepthFunc not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_color_mask)( bool r, bool g, bool b, bool a ) {
-	glColorMask(r, g, b, a);
+	if (sdl_glColorMask) sdl_glColorMask(r, g, b, a);
+	else hl_error("glColorMask not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_color_maski)( int i, bool r, bool g, bool b, bool a ) {
-	glColorMaski(i, r, g, b, a);
+	if (sdl_glColorMaski) sdl_glColorMaski(i, r, g, b, a);
+	else hl_error("glColorMaski not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_stencil_mask_separate)(int face, int mask) {
-	glStencilMaskSeparate(face, mask);
+	if (sdl_glStencilMaskSeparate) sdl_glStencilMaskSeparate(face, mask);
+	else hl_error("glStencilMaskSeparate not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_stencil_func_separate)(int face, int func, int ref, int mask ) {
-	glStencilFuncSeparate(face, func, ref, mask);
+	if (sdl_glStencilFuncSeparate) sdl_glStencilFuncSeparate(face, func, ref, mask);
+	else hl_error("glStencilFuncSeparate not loaded");
 }
 
 HL_PRIM void HL_NAME(gl_stencil_op_separate)(int face, int sfail, int dpfail, int dppass) {
-	glStencilOpSeparate(face, sfail, dpfail, dppass);
+	if (sdl_glStencilOpSeparate) sdl_glStencilOpSeparate(face, sfail, dpfail, dppass);
+	else hl_error("glStencilOpSeparate not loaded");
 }
 
 // program
